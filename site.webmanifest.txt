@@ -1,0 +1,27 @@
+{
+  "name": "LexiPyramide",
+  "short_name": "LexiPyramide",
+  "description": "Le jeu des mots au sommet — Trouve les mots cachés, grimpe les rangs, défie tes amis !",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "theme_color": "#03030c",
+  "background_color": "#03030c",
+  "display": "standalone",
+  "start_url": "/",
+  "scope": "/",
+  "orientation": "portrait-primary",
+  "lang": "fr-FR",
+  "categories": ["games", "entertainment"]
+}
