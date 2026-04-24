@@ -854,6 +854,225 @@ body:has(#screen-game.active) .wrap{position:static;}
 .badge-popup-text{}
 .badge-popup-title{font-size:.8em;font-weight:800;color:var(--green);margin-bottom:2px;}
 .badge-popup-name{font-size:.88em;font-weight:700;color:var(--txt);}
+
+/* ═══════════════════════════════════════════════════════
+   RÉDUCTION GLOBALE — VERSION ÉQUILIBRÉE
+   Pyramide réduite, panneau latéral lisible & fonctionnel
+═══════════════════════════════════════════════════════ */
+
+/* ── Variables ── */
+:root { --r:10px; --r2:16px; }
+
+/* ── Topbar & Logo ── */
+.topbar { padding:7px 14px; }
+.logo { font-size:.95em; }
+
+/* ── Boutons globaux ── */
+.btn { padding:7px 15px; font-size:.8em; gap:5px; }
+.btn-sm { padding:5px 10px; font-size:.74em; }
+.btn-lg { padding:10px 22px; font-size:.88em; }
+
+/* ── Inputs & fields ── */
+.inp { padding:8px 11px; font-size:.86em; }
+.lbl { font-size:.68em; margin-bottom:4px; }
+.field { margin-bottom:11px; }
+.card { padding:18px; }
+
+/* ── Landing ── */
+.hero-badge { padding:4px 13px; font-size:.74em; margin-bottom:16px; }
+.hero-sub { font-size:.88em; margin-bottom:24px; }
+.hero-btns { gap:9px; margin-bottom:30px; }
+.feat-grid { gap:8px; }
+.feat { padding:11px 8px; }
+.feat .fi { font-size:1.45em; margin-bottom:5px; }
+.feat p { font-size:.69em; }
+
+/* ── Rank badges ── */
+.rank { width:20px; height:20px; font-size:.7em; border-radius:5px; }
+
+/* ── Barre de jeu (game-top) ── */
+.game-top { padding:5px 10px; gap:3px; }
+.gpills { gap:3px; }
+.gpill { padding:2px 8px; font-size:.65em; }
+.my-pts { font-size:.85em; }
+.pts-wrap label { font-size:.62em; }
+
+/* ── Lettres affichées (9 tuiles) ── */
+.letters-display { padding:4px 8px; gap:3px; }
+.letter-tile {
+  width:clamp(28px,6.5vw,38px);
+  height:clamp(32px,7.5vw,43px);
+  font-size:clamp(.82em,2.2vw,1em);
+  border-radius:7px;
+}
+
+/* ── Pyramide (lbox) ── */
+.lbox {
+  width:clamp(16px,3.2vw,22px);
+  height:clamp(19px,3.9vw,26px);
+  font-size:clamp(.58em,.85vw,.74em);
+  border-radius:3px;
+}
+.wcell-inner { padding:2px; gap:2px; }
+.pyr-row { gap:3px; }
+.pyramid { gap:3px; }
+
+/* ── Panneau latéral — lisible & fonctionnel ── */
+.side-panel {
+  width:260px;          /* légèrement plus large qu'avant pour la lisibilité */
+  flex-shrink:0;
+}
+@media(max-width:700px) {
+  .game-layout { flex-direction:column; }
+  .side-panel { width:100%; height:auto; border-left:none; border-top:1px solid var(--border); max-height:50vh; }
+}
+
+/* Sections internes du panneau */
+.s-sec { padding:9px 11px; }
+.s-sec h4 { font-size:.66em; margin-bottom:6px; gap:4px; }
+
+/* Clue / devinette active */
+.clue-box { padding:9px 11px; }
+.clue-type-lbl { font-size:.66em; margin-bottom:5px; }
+.clue-text { font-size:.84em; line-height:1.5; }
+.clue-meta { gap:6px; margin-top:6px; }
+.no-clue { font-size:.82em; }
+
+/* ── Champ réponse + bouton ✓ ── */
+.ans-row { gap:6px; }
+.ans-row input {
+  flex:1;
+  padding:8px 10px;
+  font-size:.82em;
+  border-radius:8px;
+}
+.ans-row button {
+  padding:8px 13px;
+  font-size:.85em;
+  font-weight:800;
+  border-radius:8px;
+  background:var(--gold);
+  color:#03030c;
+  border:none;
+  cursor:pointer;
+  transition:all .2s;
+  white-space:nowrap;
+  flex-shrink:0;
+  min-width:36px;
+}
+.ans-row button:hover { background:var(--gold2); }
+
+/* Type switch buttons (📝 / 🧩) */
+.type-btns { gap:5px; margin-top:7px; }
+.type-btn {
+  flex:1; padding:6px; font-size:.76em;
+  border-radius:7px;
+}
+
+/* ── Indices ── */
+.hint-row { padding:5px 8px; margin-bottom:5px; }
+.hint-row span { font-size:.74em; }
+.hint-row strong { font-size:.76em; }
+.hint-reveal { padding:6px 8px; font-size:.74em; margin-top:5px; }
+
+/* ── Classement ── */
+.lb-header { margin-bottom:5px; }
+.lb-count { font-size:.64em; }
+.score-item { padding:4px 8px; font-size:.72em; border-radius:6px; margin-bottom:3px; }
+.score-item .sv { font-size:.82em; }
+.score-item .sn { font-size:.95em; }
+
+/* ── Suggestion ── */
+.sug-inp-row { gap:5px; }
+.sug-inp-row input { padding:6px 9px; font-size:.76em; }
+
+/* ── Barre de sauvegarde ── */
+.save-bar { padding:4px 10px; font-size:.62em; }
+
+/* ── Modal ── */
+.modal-box { padding:22px; max-width:360px; }
+.modal-box h3 { font-size:.98em; margin-bottom:8px; }
+.modal-box p { font-size:.83em; margin-bottom:15px; line-height:1.5; }
+
+/* ── Type choice modal ── */
+.type-modal { padding:26px 22px; border-radius:20px; max-width:440px; }
+.type-modal h2 { font-size:1.2em; margin-bottom:6px; }
+.type-modal p { font-size:.85em; margin-bottom:20px; }
+.type-choice-cards { gap:12px; margin-bottom:16px; }
+.type-card { padding:16px 12px; border-radius:13px; }
+.type-card .tc-icon { font-size:1.8em; margin-bottom:8px; }
+.type-card h3 { font-size:.88em; margin-bottom:5px; }
+.type-card p { font-size:.73em; }
+.type-card .tc-pts { font-size:.78em; margin-top:6px; }
+
+/* ── Final ── */
+.final-title { font-size:1.8em; }
+.podium { gap:8px; margin:20px 0; }
+.pi .pb { width:60px; }
+.r1 .pb { height:82px; font-size:1.05em; }
+.r2 .pb { height:60px; }
+.r3 .pb { height:44px; }
+.score-full { padding:15px; margin-bottom:18px; }
+.srow { padding:7px 0; font-size:.88em; }
+
+/* ── Défi ── */
+.defi-body { padding:18px 15px 60px; }
+.defi-header { margin-bottom:20px; }
+.defi-header h2 { font-size:1.3em; }
+.defi-header p { font-size:.86em; }
+.defi-card { padding:20px 17px; border-radius:16px; }
+.defi-question { font-size:.92em; padding:11px 14px; margin-bottom:17px; border-radius:10px; }
+.defi-ans-row input { padding:10px 13px; font-size:.84em; }
+.defi-ans-row .btn-submit-defi { padding:10px 15px; font-size:.84em; }
+.defi-feedback { padding:11px 14px; font-size:.83em; }
+.timer-ring { width:64px; height:64px; }
+.timer-ring .timer-num { font-size:1.1em; }
+.timer-ring-wrap { margin-bottom:15px; }
+.defi-score-bar { gap:8px; margin-bottom:16px; }
+.defi-score-pill { padding:10px; border-radius:10px; }
+.defi-score-pill .dsp-v { font-size:1.2em; }
+.defi-score-pill .dsp-l { font-size:.63em; }
+.defi-tabs { margin-bottom:16px; }
+.defi-tab { padding:8px; font-size:.8em; }
+
+/* ── Profil ── */
+.profil-body { padding:18px 15px 60px; }
+.profil-hero { padding:18px 16px; margin-bottom:16px; border-radius:16px; }
+.profil-tabs { margin-bottom:16px; border-radius:10px; }
+.profil-tab { padding:9px 6px; font-size:.76em; }
+.badge-grid { gap:8px; }
+.badge-card { padding:13px 9px; border-radius:10px; }
+.badge-icon { font-size:1.6em; margin-bottom:6px; }
+.badge-name { font-size:.72em; }
+.badge-desc { font-size:.63em; }
+
+/* ── Admin ── */
+.admin-body { padding:18px 15px 84px; }
+.stat { padding:12px; }
+.stat-v { font-size:1.7em; }
+.stat-l { font-size:.64em; }
+.letter-inp { width:40px; height:46px; font-size:1.15em; border-radius:8px; }
+
+/* ── Rules ── */
+.rules-body { padding:22px 15px 48px; }
+.rules-body h2 { font-size:1.25em; }
+.rule-sec { padding:14px; margin-bottom:14px; }
+.rule-sec h3 { font-size:.92em; }
+
+/* ── Wait overlay ── */
+.spin { width:36px; height:36px; border-width:3px; }
+.wait-ttl { font-size:1.05em; }
+.wait-sub { font-size:.8em; }
+
+/* ── Toast ── */
+.toast { padding:8px 18px; font-size:.8em; }
+
+/* ── Level up popup ── */
+.levelup-box { padding:30px 24px; border-radius:24px; max-width:340px; }
+.levelup-emoji { font-size:2.5em; }
+.levelup-title { font-size:1.3em; }
+.levelup-sub { font-size:.86em; margin-bottom:16px; }
+
 </style>
 </head>
 <body>
