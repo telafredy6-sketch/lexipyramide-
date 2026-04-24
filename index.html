@@ -1322,7 +1322,7 @@ body:has(#screen-game.active) .wrap{position:static;}
     </div>
     <div style="display:flex;align-items:center;gap:8px;">
       <span class="theme-locked-banner" id="defiThemeLockedBadge"></span>
-      <button class="btn btn-ghost btn-sm" onclick="showScreen('landing')">← Retour</button>
+      <button class="btn btn-ghost btn-sm" id="defiBackBtn" onclick="tryLeaveDefi()" style="display:none;">← Retour</button>
     </div>
   </div>
   <div class="defi-body">
@@ -2452,6 +2452,7 @@ async function joinGame(){
 // ── LAUNCH GAME ──
 function launchGame(){
   showScreen('game');
+  resetSessionPts();
   document.getElementById('gMode').textContent=gameMode==='solo'?'🎯 Solo':'🌐 Multi';
   document.getElementById('gTotal').textContent=gameWords.length;
   activeWordIdx=null;
@@ -2630,7 +2631,7 @@ async function submitAnswer(){
     updateProgress();
     toast(`✅ +${pts} pts ! "${w.mot}"`, 'var(--green)');
     // ── PROGRESSION HOOK ──
-    try { recordWordFound(w.rang || 'D', clueType, _hintUsedForCurrentWord); } catch(e){}
+    try { recordWordFound(w.rang || 'D', clueType, _hintUsedForCurrentWord, pts); } catch(e){}
     _hintUsedForCurrentWord = false;
     if(playerId&&gameMode==='multi'){
       const snap=await get(ref(db,`players/${playerId}`));
@@ -3008,6 +3009,16 @@ function confirmThemeChoice(){
   _startDefiWithTheme(defiLockedTheme);
 }
 
+// ── RETOUR DEPUIS LE DÉFI ──
+// Bloqué si un thème est en cours — le joueur doit terminer le thème d'abord
+function tryLeaveDefi(){
+  if(defiLockedTheme !== null){
+    toast('🔒 Termine le thème en cours avant de quitter le Défi !','var(--orange)');
+    return;
+  }
+  showScreen('landing');
+}
+
 function _startDefiWithTheme(themeIdx){
   const theme = defiThemes[themeIdx];
   if(!theme) return;
@@ -3040,6 +3051,9 @@ function _startDefiWithTheme(themeIdx){
   _setDefiTabUI(defiType);
   _buildDefiQueueFromTheme(theme);
   showScreen('defi');
+  // Masquer le bouton retour — le joueur doit finir le thème
+  const backBtn = document.getElementById('defiBackBtn');
+  if(backBtn) backBtn.style.display = 'none';
   _loadDefiQuestion();
 }
 
@@ -3310,6 +3324,9 @@ function _showDefiFinish(){
   defiLockedTheme = null;
   const badge=document.getElementById('defiThemeLockedBadge');
   if(badge)badge.style.display='none';
+  // Thème terminé — le bouton retour est maintenant accessible
+  const backBtn = document.getElementById('defiBackBtn');
+  if(backBtn) backBtn.style.display = 'inline-flex';
 }
 
 function _updateDefiScoreBar(){
@@ -3661,8 +3678,12 @@ function addXP(amount) {
   saveProfil(p);
 }
 
+// ── SUIVI DES POINTS GAGNÉS EN COURS DE PARTIE (anti double-comptage) ──
+let _sessionPtsRecorded = 0;
+function resetSessionPts() { _sessionPtsRecorded = 0; }
+
 // ── ENREGISTRER UN MOT TROUVÉ ──
-function recordWordFound(rang, type, withHint) {
+function recordWordFound(rang, type, withHint, pts) {
   const p = loadProfil();
   p.totalMots += 1;
   p.totalCorrect += 1;
@@ -3680,6 +3701,14 @@ function recordWordFound(rang, type, withHint) {
     p.noHintStreak = 0;
   }
 
+  // ── Accumuler les pts dans le profil immédiatement ──
+  if (pts) {
+    p.totalPts = (p.totalPts || 0) + pts;
+    _sessionPtsRecorded += pts;
+    if (myScore > (p.bestScore || 0)) p.bestScore = myScore;
+    p.lastSeen = Date.now();
+  }
+
   // XP selon rang
   const xpMap = {A: 20, B: 12, C: 6, D: 3};
   const xpGain = (xpMap[rang] || 3) + (withHint ? 0 : 2); // bonus sans indice
@@ -3692,7 +3721,10 @@ function recordGameEnd(score, motsTrouves, mode) {
   const p = loadProfil();
   if (!p.name && playerName) p.name = playerName;
   if (!p.email && playerEmail) p.email = playerEmail;
-  p.totalPts = (p.totalPts || 0) + score;
+  // Seulement les pts pas encore comptés mot par mot
+  const ptsRestants = score - _sessionPtsRecorded;
+  if (ptsRestants > 0) p.totalPts = (p.totalPts || 0) + ptsRestants;
+  _sessionPtsRecorded = 0;
   p.totalParties = (p.totalParties || 0) + 1;
   if (score > (p.bestScore || 0)) p.bestScore = score;
   p.modePref = mode;
@@ -3714,6 +3746,13 @@ function recordDefiResult(correct, wrong, streak) {
   p.defiCorrect = (p.defiCorrect || 0) + correct;
   p.defiWrong = (p.defiWrong || 0) + wrong;
   if (streak > (p.defiMaxStreak || 0)) p.defiMaxStreak = streak;
+  // ── Ajouter les pts du défi dans le profil immédiatement ──
+  if (defiPoints > 0) {
+    p.totalPts = (p.totalPts || 0) + defiPoints;
+    const totalAvecDefi = (defiGameScoreBefore||0) + defiPoints;
+    if (totalAvecDefi > (p.bestScore || 0)) p.bestScore = totalAvecDefi;
+    p.lastSeen = Date.now();
+  }
   saveProfil(p);
   addXP(correct * 5);
 }
