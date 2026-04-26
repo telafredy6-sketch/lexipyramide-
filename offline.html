@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LexiPyramide — Hors ligne</title>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;700;800&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
+<style>
+  :root{--bg:#03030c;--gold:#f5c400;--teal:#00e8c8;--muted2:#9090bb;--s2:#0d0d22;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:#eeeeff;font-family:'Exo 2',sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;text-align:center;padding:30px 20px;}
+  .icon{font-size:4em;margin-bottom:16px;animation:pulse 2s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{transform:scale(1);}50%{transform:scale(1.1);}}
+  h1{font-family:'Orbitron',sans-serif;font-size:1.8em;color:var(--gold);margin-bottom:10px;}
+  p{color:var(--muted2);line-height:1.7;font-size:.95em;margin-bottom:24px;max-width:400px;}
+  .card{background:var(--s2);border:1.5px solid rgba(255,255,255,.08);border-radius:16px;
+    padding:24px;max-width:420px;width:100%;margin-bottom:24px;}
+  .card h2{font-size:1em;color:var(--teal);margin-bottom:12px;}
+  ul{list-style:none;text-align:left;}
+  ul li{padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:.88em;color:var(--muted2);}
+  ul li:last-child{border:none;}
+  ul li::before{content:'✓ ';color:var(--gold);}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:12px 28px;
+    background:linear-gradient(135deg,var(--gold),#ffe566);color:#03030c;
+    border:none;border-radius:50px;font-family:'Exo 2',sans-serif;font-weight:700;
+    font-size:.9em;cursor:pointer;text-decoration:none;}
+  .status{font-size:.75em;color:var(--muted2);margin-top:16px;}
+  #onlineStatus{color:var(--gold);}
+  #onlineStatus.online{color:#00cc7a;}
+</style>
+</head>
+<body>
+<div class="icon">📡</div>
+<h1>Tu es hors ligne</h1>
+<p>La connexion internet est nécessaire pour le mode <strong>Multijoueur</strong>.<br>
+Mais tu peux jouer en <strong>Solo</strong> sans connexion !</p>
+
+<div class="card">
+  <h2>🎯 Disponible hors ligne</h2>
+  <ul>
+    <li>Mode Solo complet (mots, indices, progression)</li>
+    <li>Mode Défi — thèmes sauvegardés localement</li>
+    <li>Ton profil et tes statistiques</li>
+    <li>Historique de tes parties</li>
+    <li>Tes badges et récompenses</li>
+  </ul>
+</div>
+
+<a href="/" class="btn">🎮 Revenir au jeu</a>
+
+<p class="status">
+  Statut : <span id="onlineStatus">🔴 Hors ligne</span>
+</p>
+
+<script>
+  function updateStatus(){
+    const el = document.getElementById('onlineStatus');
+    if(navigator.onLine){
+      el.textContent = '🟢 En ligne — rechargement…';
+      el.classList.add('online');
+      setTimeout(() => window.location.href = '/', 1500);
+    } else {
+      el.textContent = '🔴 Hors ligne';
+      el.classList.remove('online');
+    }
+  }
+  window.addEventListener('online', updateStatus);
+  window.addEventListener('offline', updateStatus);
+  updateStatus();
+</script>
+</body>
+</html>

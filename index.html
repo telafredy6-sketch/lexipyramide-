@@ -39,6 +39,105 @@
 <meta name="msapplication-TileColor" content="#03030c"/>
 
 <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;800;900&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
+
+<!-- ── SERVICE WORKER + PWA ── -->
+<script>
+// ══════════════════════════════════════════════════════
+//  ENREGISTREMENT DU SERVICE WORKER
+// ══════════════════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      console.log('[App] Service Worker enregistré :', reg.scope);
+
+      // Détection mise à jour disponible
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // Notifier l'app qu'une mise à jour est prête
+            window.__swUpdateReady = true;
+            window.dispatchEvent(new CustomEvent('sw-update-ready'));
+          }
+        });
+      });
+
+      // Écouter les messages du SW (Background Sync)
+      navigator.serviceWorker.addEventListener('message', event => {
+        const { type } = event.data || {};
+        if (type === 'SYNC_SOLO_SCORES') {
+          console.log('[App] Background Sync scores solo reçu');
+          if (typeof window.idbSyncSoloScores === 'function') {
+            window.idbSyncSoloScores();
+          }
+        }
+        if (type === 'SYNC_SOLO_PROGRESS') {
+          console.log('[App] Background Sync progression reçu');
+          if (typeof window.idbSyncSoloProgress === 'function') {
+            window.idbSyncSoloProgress();
+          }
+        }
+      });
+
+    } catch (err) {
+      console.warn('[App] Échec enregistrement SW :', err);
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  DÉTECTION CONNEXION — Indicateur visuel en temps réel
+// ══════════════════════════════════════════════════════
+window.__isOnline = navigator.onLine;
+
+function _updateOnlineUI(online) {
+  window.__isOnline = online;
+  // Indicateur dans la topbar (injecté plus bas)
+  const dot = document.getElementById('connDot');
+  const lbl = document.getElementById('connLbl');
+  if (dot) dot.style.background = online ? '#00cc7a' : '#ff2244';
+  if (lbl) lbl.textContent = online ? 'En ligne' : 'Hors ligne';
+
+  // Désactiver le bouton Multijoueur si hors ligne
+  const tabMulti = document.getElementById('tab-multi');
+  if (tabMulti) {
+    tabMulti.style.opacity = online ? '1' : '0.4';
+    tabMulti.style.cursor  = online ? 'pointer' : 'not-allowed';
+    tabMulti.title = online ? '' : '🔌 Connexion requise pour le multijoueur';
+  }
+
+  // Afficher un toast si le statut change (pas au premier chargement)
+  if (window.__connStatusInit) {
+    if (typeof window.toast === 'function') {
+      window.toast(
+        online ? '🟢 Connexion rétablie !' : '🔴 Hors ligne — Mode Solo uniquement',
+        online ? 'var(--green)' : 'var(--red)'
+      );
+    }
+    // Background Sync : tenter de synchro les scores solo en attente
+    if (online && 'serviceWorker' in navigator && 'SyncManager' in window) {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.sync.register('sync-solo-scores').catch(() => {});
+        reg.sync.register('sync-solo-progress').catch(() => {});
+      });
+    } else if (online && typeof window.idbSyncSoloScores === 'function') {
+      window.idbSyncSoloScores();
+    }
+  }
+  window.__connStatusInit = true;
+}
+
+window.addEventListener('online',  () => _updateOnlineUI(true));
+window.addEventListener('offline', () => _updateOnlineUI(false));
+// Init au chargement (sans toast)
+window.addEventListener('DOMContentLoaded', () => {
+  _updateOnlineUI(navigator.onLine);
+  window.__connStatusInit = false; // reset pour que le 1er vrai changement déclenche le toast
+  setTimeout(() => { window.__connStatusInit = true; }, 2000);
+});
+</script>
 <style>
 :root{
   --bg:#03030c;--s1:#07071a;--s2:#0d0d22;--s3:#13132c;--s4:#191936;--s5:#1f1f42;
@@ -1315,7 +1414,13 @@ body:has(#screen-game.active) .wrap{position:static;}
 <div id="screen-landing" class="screen active">
   <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 22px;">
     <div class="logo"><span class="l1">Lexi</span><span class="ldot">◆</span><span class="l2">Pyramide</span></div>
-    <button class="btn btn-ghost btn-sm" onclick="showScreen('admin-login')">⚙️ Admin</button>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div id="connStatus" style="display:flex;align-items:center;gap:5px;font-size:.72em;font-weight:700;color:var(--muted2);background:var(--s2);padding:4px 10px;border-radius:50px;border:1px solid var(--border);">
+        <span id="connDot" style="width:7px;height:7px;border-radius:50%;background:#00cc7a;display:inline-block;flex-shrink:0;"></span>
+        <span id="connLbl">En ligne</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="showScreen('admin-login')">⚙️ Admin</button>
+    </div>
   </div>
   <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:20px 20px 40px;">
     <div class="hero">
@@ -1327,6 +1432,7 @@ body:has(#screen-game.active) .wrap{position:static;}
         <button class="btn btn-teal btn-lg" onclick="try{window.sndPageNav();}catch(e){}showScreen('rules')">📖 Règles</button>
         <button class="btn btn-purple btn-lg" onclick="try{window.sndPageNav();}catch(e){}initDefi()">🎲 Défi</button>
         <button class="btn btn-ghost btn-lg" onclick="try{window.sndPageNav();}catch(e){}openProfil()">👤 Mon Profil</button>
+        <button class="btn btn-danger btn-lg" onclick="quitApp()">🚪 Quitter</button>
       </div>
       <div class="feat-grid">
         <div class="feat"><div class="fi">◆</div><p>Pyramide 80 mots</p></div>
@@ -1664,6 +1770,10 @@ body:has(#screen-game.active) .wrap{position:static;}
         <div class="mode-tab active" id="tab-multi" onclick="selectMode('multi')">🌐 Multijoueur</div>
         <div class="mode-tab" id="tab-solo" onclick="selectMode('solo')">🎯 Solo</div>
       </div>
+      <!-- Bannière hors ligne -->
+      <div id="offlineBanner" style="display:none;padding:8px 14px;background:rgba(255,34,68,.08);border:1.5px solid rgba(255,34,68,.25);border-radius:10px;font-size:.78em;font-weight:700;color:#ff6688;text-align:center;margin-bottom:8px;">
+        🔴 Hors ligne — Seul le mode <strong>Solo</strong> est disponible
+      </div>
       <div id="restoreBanner" class="restore-banner" style="display:none;">
         💾 <strong>Progression trouvée !</strong> Tu vas reprendre là où tu t'es arrêté.
         <div id="restoreTypeInfo" style="margin-top:4px;font-size:.85em;"></div>
@@ -1909,6 +2019,22 @@ body:has(#screen-game.active) .wrap{position:static;}
 </div>
 
 <!-- MODAL QUITTER -->
+<!-- ===== MODAL QUITTER L'APPLICATION ===== -->
+<div class="modal-ov" id="modalQuitApp">
+  <div class="modal-box" style="max-width:340px;">
+    <div style="font-size:2.4em;margin-bottom:12px;">🚪</div>
+    <h3 style="margin-bottom:8px;">Quitter LexiPyramide ?</h3>
+    <p style="margin-bottom:6px;">Toute ta <strong style="color:var(--teal)">progression est sauvegardée</strong>.<br>Tu retrouveras ton profil, tes badges et ton score intacts à ton retour.</p>
+    <p style="font-size:.78em;color:var(--muted2);margin-bottom:18px;">
+      ℹ️ Sur navigateur, utilise le bouton de ton appareil pour fermer l'onglet.
+    </p>
+    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+      <button class="btn btn-danger" onclick="confirmQuitApp()">🚪 Oui, quitter</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('modalQuitApp').classList.remove('show')">← Rester</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-ov" id="modalLeave">
   <div class="modal-box">
     <h3>⚠️ Quitter la partie ?</h3>
@@ -2298,6 +2424,374 @@ const FB = {
 
 const ADMIN_PWD = "Lx#9mP@2k";
 
+// ════════════════════════════════════════════════════════════════
+//  ██╗██████╗ ██████╗     ███╗   ███╗ ██████╗ ██████╗
+//  ██║██╔══██╗██╔══██╗    ████╗ ████║██╔═══██╗██╔══██╗
+//  ██║██║  ██║██████╔╝    ██╔████╔██║██║   ██║██║  ██║
+//  ██║██║  ██║██╔══██╗    ██║╚██╔╝██║██║   ██║██║  ██║
+//  ██║██████╔╝██████╔╝    ██║ ╚═╝ ██║╚██████╔╝██████╔╝
+//  ╚═╝╚═════╝ ╚═════╝     ╚═╝     ╚═╝ ╚═════╝ ╚═════╝
+//  IndexedDB — Persistence hors ligne pour le mode Solo
+//  Stores :
+//    • solo_progress  : progression en cours (score, mots résolus, type)
+//    • solo_history   : historique des parties terminées
+//    • game_cache     : mots et lettres du jeu (chargés en ligne, relus offline)
+//    • defi_cache     : thèmes du mode Défi
+//    • profil         : profil joueur (stats, badges)
+//    • pending_sync   : données en attente de synchro Firebase (Background Sync)
+// ════════════════════════════════════════════════════════════════
+
+const IDB_NAME    = 'LexiPyramideDB';
+const IDB_VERSION = 2;
+
+// ── Ouvrir / migrer la base ───────────────────────────────────
+const idbPromise = new Promise((resolve, reject) => {
+  const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+
+  req.onupgradeneeded = (event) => {
+    const db = event.target.result;
+    const oldVersion = event.oldVersion;
+
+    // Store : progression solo (une entrée par email)
+    if (!db.objectStoreNames.contains('solo_progress')) {
+      const sp = db.createObjectStore('solo_progress', { keyPath: 'email' });
+      sp.createIndex('ts', 'ts');
+    }
+
+    // Store : historique des parties
+    if (!db.objectStoreNames.contains('solo_history')) {
+      const sh = db.createObjectStore('solo_history', { keyPath: 'id', autoIncrement: true });
+      sh.createIndex('email', 'email');
+      sh.createIndex('date', 'date');
+    }
+
+    // Store : cache mots+lettres du jeu (clé fixe "current")
+    if (!db.objectStoreNames.contains('game_cache')) {
+      db.createObjectStore('game_cache', { keyPath: 'key' });
+    }
+
+    // Store : cache thèmes Défi
+    if (!db.objectStoreNames.contains('defi_cache')) {
+      db.createObjectStore('defi_cache', { keyPath: 'key' });
+    }
+
+    // Store : profil joueur (clé = email)
+    if (!db.objectStoreNames.contains('profil_idb')) {
+      db.createObjectStore('profil_idb', { keyPath: 'email' });
+    }
+
+    // Store : opérations en attente de sync Firebase
+    if (!db.objectStoreNames.contains('pending_sync')) {
+      const ps = db.createObjectStore('pending_sync', { keyPath: 'id', autoIncrement: true });
+      ps.createIndex('type', 'type');
+    }
+
+    console.log('[IDB] Base initialisée / migrée v' + IDB_VERSION);
+  };
+
+  req.onsuccess  = (e) => { console.log('[IDB] Ouverte ✅'); resolve(e.target.result); };
+  req.onerror    = (e) => { console.error('[IDB] Erreur ouverture:', e.target.error); reject(e.target.error); };
+  req.onblocked  = ()  => { console.warn('[IDB] Bloquée — ferme les autres onglets LexiPyramide'); };
+});
+
+// ── Helpers génériques ────────────────────────────────────────
+async function idbGet(storeName, key) {
+  const db = await idbPromise;
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).get(key);
+    req.onsuccess = () => res(req.result ?? null);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+async function idbPut(storeName, value) {
+  const db = await idbPromise;
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).put(value);
+    req.onsuccess = () => res(req.result);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+async function idbDelete(storeName, key) {
+  const db = await idbPromise;
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).delete(key);
+    req.onsuccess = () => res();
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+async function idbGetAll(storeName) {
+  const db = await idbPromise;
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readonly');
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => res(req.result || []);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+async function idbClear(storeName) {
+  const db = await idbPromise;
+  return new Promise((res, rej) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const req = tx.objectStore(storeName).clear();
+    req.onsuccess = () => res();
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+async function idbGetByIndex(storeName, indexName, value) {
+  const db = await idbPromise;
+  return new Promise((res, rej) => {
+    const tx  = db.transaction(storeName, 'readonly');
+    const idx = tx.objectStore(storeName).index(indexName);
+    const req = idx.getAll(IDBKeyRange.only(value));
+    req.onsuccess = () => res(req.result || []);
+    req.onerror   = () => rej(req.error);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  API PUBLIQUE — Progression Solo
+// ════════════════════════════════════════════════════════════════
+
+/** Sauvegarder la progression en cours (appelé à chaque bonne réponse) */
+async function idbSaveProgress(email, data) {
+  try {
+    await idbPut('solo_progress', {
+      email,
+      score:     data.score     || 0,
+      solved:    data.solved    || [],
+      clueType:  data.clueType  || 'devinette',
+      name:      data.name      || '',
+      ts:        Date.now(),
+      gameWords: data.gameWords || null,  // snapshot des mots actifs
+    });
+    // Aussi garder en localStorage comme backup
+    localStorage.setItem('lexipyr_' + email, JSON.stringify({
+      score: data.score, solved: data.solved, clueType: data.clueType,
+      ts: Date.now(), name: data.name
+    }));
+    console.log('[IDB] Progression sauvegardée pour', email);
+  } catch(e) {
+    console.warn('[IDB] idbSaveProgress erreur:', e);
+    // Fallback : localStorage seulement
+    localStorage.setItem('lexipyr_' + email, JSON.stringify(data));
+  }
+}
+
+/** Charger la progression d'une session solo */
+async function idbLoadProgress(email) {
+  try {
+    // Priorité : IndexedDB
+    const idbData = await idbGet('solo_progress', email);
+    if (idbData) return idbData;
+
+    // Fallback : localStorage (migration automatique)
+    const lsRaw = localStorage.getItem('lexipyr_' + email);
+    if (lsRaw) {
+      const parsed = JSON.parse(lsRaw);
+      // Migrer vers IndexedDB
+      await idbSaveProgress(email, parsed);
+      return parsed;
+    }
+    return null;
+  } catch(e) {
+    console.warn('[IDB] idbLoadProgress erreur:', e);
+    // Fallback pur localStorage
+    const raw = localStorage.getItem('lexipyr_' + email);
+    return raw ? JSON.parse(raw) : null;
+  }
+}
+
+/** Effacer la progression solo (après fin de partie) */
+async function idbClearProgress(email) {
+  try {
+    await idbDelete('solo_progress', email);
+    localStorage.removeItem('lexipyr_' + email);
+  } catch(e) {
+    localStorage.removeItem('lexipyr_' + email);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  API PUBLIQUE — Cache Mots/Lettres (pour offline)
+// ════════════════════════════════════════════════════════════════
+
+/** Sauvegarder les mots et lettres du jeu (quand on les charge depuis Firebase) */
+async function idbCacheGame(words, letters) {
+  try {
+    await idbPut('game_cache', { key: 'current', words, letters, cachedAt: Date.now() });
+    console.log('[IDB] Cache jeu mis à jour :', words.length, 'mots');
+  } catch(e) {
+    console.warn('[IDB] idbCacheGame erreur:', e);
+  }
+}
+
+/** Lire le cache mots/lettres (utilisé si Firebase offline) */
+async function idbGetCachedGame() {
+  try {
+    return await idbGet('game_cache', 'current');
+  } catch(e) {
+    console.warn('[IDB] idbGetCachedGame erreur:', e);
+    return null;
+  }
+}
+
+/** Sauvegarder les thèmes du mode Défi */
+async function idbCacheDefi(themes, timeout) {
+  try {
+    await idbPut('defi_cache', { key: 'themes', themes, timeout: timeout || 45, cachedAt: Date.now() });
+    console.log('[IDB] Cache Défi mis à jour');
+  } catch(e) {
+    console.warn('[IDB] idbCacheDefi erreur:', e);
+  }
+}
+
+/** Lire le cache Défi */
+async function idbGetCachedDefi() {
+  try {
+    return await idbGet('defi_cache', 'themes');
+  } catch(e) {
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  API PUBLIQUE — Historique des parties
+// ════════════════════════════════════════════════════════════════
+
+/** Enregistrer une partie terminée */
+async function idbAddHistory(email, entry) {
+  try {
+    await idbPut('solo_history', {
+      email,
+      date:  entry.date  || Date.now(),
+      score: entry.score || 0,
+      mots:  entry.mots  || 0,
+      mode:  entry.mode  || 'solo',
+      type:  entry.type  || 'devinette',
+    });
+    console.log('[IDB] Historique enregistré');
+  } catch(e) {
+    console.warn('[IDB] idbAddHistory erreur:', e);
+  }
+}
+
+/** Charger l'historique d'un joueur */
+async function idbGetHistory(email) {
+  try {
+    const all = await idbGetByIndex('solo_history', 'email', email);
+    return all.sort((a, b) => (b.date || 0) - (a.date || 0));
+  } catch(e) {
+    console.warn('[IDB] idbGetHistory erreur:', e);
+    return [];
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  API PUBLIQUE — Profil Joueur (stats, badges)
+// ════════════════════════════════════════════════════════════════
+
+/** Sauvegarder le profil dans IndexedDB (en plus du localStorage) */
+async function idbSaveProfil(profilObj) {
+  try {
+    if (!profilObj.email) return;
+    await idbPut('profil_idb', profilObj);
+  } catch(e) {
+    console.warn('[IDB] idbSaveProfil erreur:', e);
+  }
+}
+
+/** Charger le profil depuis IndexedDB */
+async function idbGetProfil(email) {
+  try {
+    return await idbGet('profil_idb', email);
+  } catch(e) {
+    return null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  API PUBLIQUE — Pending Sync (Background Sync Firebase)
+// ════════════════════════════════════════════════════════════════
+
+/** Ajouter une opération en attente de sync */
+async function idbAddPendingSync(type, data) {
+  try {
+    await idbPut('pending_sync', { type, data, ts: Date.now() });
+    // Demander un Background Sync au SW
+    if ('serviceWorker' in navigator && 'SyncManager' in window) {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.sync.register('sync-solo-scores');
+    }
+  } catch(e) {
+    console.warn('[IDB] idbAddPendingSync erreur:', e);
+  }
+}
+
+/** Récupérer et vider les opérations en attente */
+async function idbFlushPendingSync() {
+  try {
+    const pending = await idbGetAll('pending_sync');
+    await idbClear('pending_sync');
+    return pending;
+  } catch(e) {
+    return [];
+  }
+}
+
+/** Synchroniser les scores solo vers Firebase quand la connexion revient */
+window.idbSyncSoloScores = async function() {
+  if (!window.__isOnline) return;
+  try {
+    const pending = await idbFlushPendingSync();
+    if (!pending.length) return;
+    console.log('[IDB] Sync', pending.length, 'opération(s) en attente vers Firebase');
+    for (const op of pending) {
+      if (op.type === 'solo_score' && op.data) {
+        // Les scores solo ne remontent pas dans Firebase (solo = local)
+        // Mais on pourrait implémenter un tableau de scores global ici
+        console.log('[IDB] Score solo à synchroniser:', op.data);
+      }
+    }
+    if (typeof window.toast === 'function') {
+      window.toast('☁️ Progression synchronisée !', 'var(--teal)');
+    }
+  } catch(e) {
+    console.warn('[IDB] idbSyncSoloScores erreur:', e);
+  }
+};
+
+window.idbSyncSoloProgress = async function() {
+  if (!window.__isOnline) return;
+  console.log('[IDB] Sync progression solo déclenchée');
+};
+
+// ════════════════════════════════════════════════════════════════
+//  EXPOSITION GLOBALE des APIs IDB
+// ════════════════════════════════════════════════════════════════
+window.idbSaveProgress    = idbSaveProgress;
+window.idbLoadProgress    = idbLoadProgress;
+window.idbClearProgress   = idbClearProgress;
+window.idbCacheGame       = idbCacheGame;
+window.idbGetCachedGame   = idbGetCachedGame;
+window.idbCacheDefi       = idbCacheDefi;
+window.idbGetCachedDefi   = idbGetCachedDefi;
+window.idbAddHistory      = idbAddHistory;
+window.idbGetHistory      = idbGetHistory;
+window.idbSaveProfil      = idbSaveProfil;
+window.idbGetProfil       = idbGetProfil;
+window.idbAddPendingSync  = idbAddPendingSync;
+
+console.log('[IDB] Module IndexedDB prêt ✅');
+// ════════════════════════════════════════════════════════════════
+
 const RANK_PTS = {A:{dev:5,cha:6},B:{dev:4,cha:5},C:{dev:2,cha:3},D:{dev:1,cha:2}};
 
 const app = initializeApp(FB);
@@ -2408,6 +2902,8 @@ let _hintUsedForCurrentWord = false; // tracker indice pour progression
 
 // ── EXPOSE ──
 window.showScreen = showScreen;
+window.quitApp = quitApp;
+window.confirmQuitApp = confirmQuitApp;
 window.checkAdminPwd = checkAdminPwd;
 window.logout = logout;
 window.selectMode = selectMode;
@@ -2476,25 +2972,51 @@ function showWait(ttl,sub=''){
 function hideWait(){document.getElementById('waitOv').classList.remove('show');}
 function closeModal(){document.getElementById('modalLeave').classList.remove('show');}
 
-// ── CHECK EMAIL RESTORE ──
+// ── CHECK EMAIL RESTORE (IDB + localStorage + Firebase) ──
 document.getElementById('playerEmail').addEventListener('input', async function(){
   const email = this.value.trim();
+  const rb = document.getElementById('restoreBanner');
+  const ri = document.getElementById('restoreTypeInfo');
   if(!email || !email.includes('@')) {
-    document.getElementById('restoreBanner').style.display='none';
+    if(rb) rb.style.display='none';
     return;
   }
-  // Check localStorage for solo saves
+
+  // 1. Vérifier IndexedDB (offline-first)
+  if(typeof idbLoadProgress === 'function'){
+    const idbData = await idbLoadProgress(email).catch(()=>null);
+    if(idbData && (idbData.score > 0 || (idbData.solved && idbData.solved.length > 0))){
+      if(rb) rb.style.display='block';
+      if(ri) ri.textContent = `💾 ${idbData.solved?.length||0} mots — ${(idbData.score||0).toFixed(2)} pts (${idbData.clueType==='devinette'?'📝 Devinette':'🧩 Charade'})`;
+      return;
+    }
+  }
+
+  // 2. Vérifier localStorage (backup)
   const soloSave = localStorage.getItem('lexipyr_'+email);
   if(soloSave){
-    document.getElementById('restoreBanner').style.display='block';
+    if(rb) rb.style.display='block';
+    try{
+      const d=JSON.parse(soloSave);
+      if(ri) ri.textContent = `💾 ${d.solved?.length||0} mots — ${(d.score||0).toFixed(2)} pts`;
+    }catch(e){}
     return;
   }
-  // Check Firebase for multi saves
-  const snap = await get(ref(db,'players'));
-  if(snap.exists()){
-    const found = Object.values(snap.val()).find(p=>p.email===email && (p.score>0 || (p.solved&&p.solved.length>0)));
-    document.getElementById('restoreBanner').style.display = found ? 'block' : 'none';
+
+  // 3. Vérifier Firebase pour le mode multi (seulement si en ligne)
+  if(window.__isOnline){
+    try{
+      const snap = await get(ref(db,'players'));
+      if(snap.exists()){
+        const found = Object.values(snap.val()).find(p=>p.email===email && (p.score>0 || (p.solved&&p.solved.length>0)));
+        if(rb) rb.style.display = found ? 'block' : 'none';
+        if(found && ri) ri.textContent = `🌐 Multijoueur — ${found.solved?.length||0} mots — ${(found.score||0).toFixed(2)} pts`;
+        return;
+      }
+    }catch(e){}
   }
+
+  if(rb) rb.style.display='none';
 });
 
 // ── ADMIN ──
@@ -2752,9 +3274,17 @@ async function endGameAdmin(){await set(ref(db,'gameState'),{status:'finished'})
 
 // ── JOIN ──
 function selectMode(m){
+  // Si hors ligne, forcer solo
+  if(m==='multi' && !window.__isOnline){
+    toast('🔴 Connexion requise pour le multijoueur !','var(--red)');
+    m='solo';
+  }
   gameMode=m;
   document.getElementById('tab-multi').classList.toggle('active',m==='multi');
   document.getElementById('tab-solo').classList.toggle('active',m==='solo');
+  // Afficher/masquer bannière hors ligne
+  const ob = document.getElementById('offlineBanner');
+  if(ob) ob.style.display = !window.__isOnline ? 'block' : 'none';
 }
 
 // ── TYPE CHOICE MODAL ──
@@ -2823,18 +3353,55 @@ async function joinGame(){
   const email=document.getElementById('playerEmail').value.trim();
   if(!name)return toast('Entre ton prénom !','var(--red)');
   if(!email||!email.includes('@'))return toast('Entre un email valide !','var(--red)');
+
+  // ── Bloquer le multijoueur si hors ligne ────────────────────
+  if(gameMode==='multi' && !window.__isOnline){
+    toast('🔴 Connexion requise pour le multijoueur !','var(--red)');
+    // Basculer automatiquement en solo
+    selectMode('solo');
+    return;
+  }
+
   playerName=name;playerEmail=email;
   // ── Sauvegarder nom/email dans le profil local ──
   try {
     const p = loadProfil();
     p.name = name; p.email = email; p.lastSeen = Date.now();
     saveProfil(p);
+    // Sync profil vers IDB
+    if(typeof idbSaveProfil === 'function') idbSaveProfil({...p, email}).catch(()=>{});
   } catch(e){}
 
   showWait('Connexion...','Chargement du jeu');
-  const [wSnap,lSnap]=await Promise.all([get(ref(db,'gameWords')),get(ref(db,'gameLetters'))]);
-  if(wSnap.exists())gameWords=wSnap.val();
-  if(lSnap.exists())gameLetters=lSnap.val();
+
+  // ── Charger mots/lettres depuis Firebase OU depuis le cache IDB ──
+  if(window.__isOnline){
+    try{
+      const [wSnap,lSnap]=await Promise.all([get(ref(db,'gameWords')),get(ref(db,'gameLetters'))]);
+      if(wSnap.exists()) gameWords=wSnap.val();
+      if(lSnap.exists()) gameLetters=lSnap.val();
+      // ── Mettre en cache pour utilisation hors ligne ──
+      if(typeof idbCacheGame === 'function'){
+        idbCacheGame(gameWords, gameLetters).catch(()=>{});
+      }
+    }catch(e){
+      console.warn('[Game] Chargement Firebase échoué, utilisation du cache IDB');
+      const cached = typeof idbGetCachedGame==='function' ? await idbGetCachedGame() : null;
+      if(cached){ gameWords=cached.words; gameLetters=cached.letters; }
+    }
+  } else {
+    // Hors ligne : lire depuis le cache IDB
+    const cached = typeof idbGetCachedGame==='function' ? await idbGetCachedGame() : null;
+    if(cached){
+      gameWords=cached.words; gameLetters=cached.letters;
+      const age = Math.round((Date.now()-cached.cachedAt)/(1000*60));
+      toast(`📦 Jeu chargé depuis le cache (il y a ${age} min)`, 'var(--teal)');
+    } else {
+      // Aucun cache : utiliser les mots par défaut
+      gameWords=[...DEFAULT_WORDS]; gameLetters=[...DEFAULT_LETTERS];
+      toast('📦 Mots par défaut (premier lancement hors ligne)', 'var(--orange)');
+    }
+  }
 
   if(gameMode==='multi'){
     const pSnap=await get(ref(db,'players'));
@@ -2880,17 +3447,31 @@ async function joinGame(){
       });
     }
   } else {
-    // ── SOLO ──
-    const saved=localStorage.getItem('lexipyr_'+email);
+    // ── SOLO — IndexedDB first, localStorage fallback ──
     let hasRestore=false;
-    if(saved){
-      try{
-        const d=JSON.parse(saved);
-        myScore=d.score||0;solvedWords=new Set((d.solved||[]).map(Number));
-        clueType=d.clueType||'devinette';typeLocked=true;hasRestore=true;
-        toast('👋 Progression restaurée !','var(--teal)');
-      }catch(e){myScore=0;solvedWords=new Set();}
-    }
+    try{
+      let d = null;
+      if(typeof idbLoadProgress === 'function'){
+        d = await idbLoadProgress(email);
+      }
+      if(!d){
+        // Fallback localStorage
+        const raw = localStorage.getItem('lexipyr_'+email);
+        if(raw) d = JSON.parse(raw);
+      }
+      if(d){
+        myScore=d.score||0;
+        solvedWords=new Set((d.solved||[]).map(Number));
+        clueType=d.clueType||'devinette';
+        typeLocked=true;
+        hasRestore=true;
+        // Si les mots du jeu sont dans le cache IDB, les restaurer
+        if(d.gameWords && d.gameWords.length){
+          gameWords = d.gameWords;
+        }
+        toast('👋 Progression restaurée (hors ligne OK) !','var(--teal)');
+      }
+    }catch(e){myScore=0;solvedWords=new Set();}
     if(!hasRestore){myScore=0;solvedWords=new Set();typeLocked=false;}
     playerId='solo_'+Date.now();
     hideWait();
@@ -3122,11 +3703,24 @@ function updateProgress(){
 // ── SAVE PROGRESS ──
 function saveProgress(){
   if(gameMode==='solo'){
-    const data={score:myScore,solved:[...solvedWords],clueType,ts:Date.now(),name:playerName};
-    localStorage.setItem('lexipyr_'+playerEmail,JSON.stringify(data));
+    const data={score:myScore,solved:[...solvedWords],clueType,ts:Date.now(),name:playerName,gameWords};
+    // ── IndexedDB (offline-first) + localStorage (backup) ──
+    if(typeof idbSaveProgress === 'function'){
+      idbSaveProgress(playerEmail, data).catch(()=>{});
+    } else {
+      localStorage.setItem('lexipyr_'+playerEmail,JSON.stringify(data));
+    }
     updateSaveStatus(true);
   }else if(playerId){
-    update(ref(db,`players/${playerId}`),{score:myScore,solved:[...solvedWords],clueType});
+    // Multi : Firebase toujours requis (en ligne)
+    if(window.__isOnline){
+      update(ref(db,`players/${playerId}`),{score:myScore,solved:[...solvedWords],clueType});
+    } else {
+      // Hors ligne → file d'attente Background Sync
+      if(typeof idbAddPendingSync === 'function'){
+        idbAddPendingSync('multi_score',{playerId,score:myScore,solved:[...solvedWords],clueType});
+      }
+    }
     updateSaveStatus(true);
   }
 }
@@ -3233,6 +3827,111 @@ function listenSolvedWords(){
 
 // ── QUIT ──
 function confirmLeave(){document.getElementById('modalLeave').classList.add('show');}
+// ══════════════════════════════════════════════════════════
+//  QUITTER L'APPLICATION — Bouton page d'accueil
+//
+//  Ce que fait confirmQuitApp() :
+//  1. Sauvegarde immédiate de tout (profil + progression)
+//  2. Coupe proprement les listeners Firebase (pas de fuite mémoire)
+//  3. Remet l'état JS à zéro (variables de session)
+//  4. Tente window.close() — fonctionne si PWA installée
+//  5. Si onglet normal → affiche une page "Au revoir" statique
+//     (le navigateur bloque window.close() sur onglet ouvert
+//      directement par l'utilisateur — c'est une règle de sécurité web)
+// ══════════════════════════════════════════════════════════
+function quitApp() {
+  // Sauvegarder discrètement avant d'afficher le modal
+  try { saveProgress(); } catch(e){}
+  try { saveProfil(loadProfil()); } catch(e){}
+  document.getElementById('modalQuitApp').classList.add('show');
+}
+
+function confirmQuitApp() {
+  document.getElementById('modalQuitApp').classList.remove('show');
+
+  // ── Sauvegarde finale complète ──
+  try { saveProgress(); } catch(e){}
+
+  // ── Couper les listeners Firebase en cours ──
+  // (évite des erreurs en console après fermeture)
+  try {
+    if(typeof _firebaseUnsubscribers !== 'undefined'){
+      _firebaseUnsubscribers.forEach(fn => { try{ fn(); }catch(e){} });
+    }
+  } catch(e){}
+
+  // ── Notifier le Service Worker : session terminée ──
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(reg => {
+        if(reg.active) reg.active.postMessage({ type: 'SESSION_END' });
+      });
+    }).catch(()=>{});
+  }
+
+  // ── Remettre l'état de session à zéro en mémoire ──
+  try {
+    playerName=''; playerEmail=''; playerId=null;
+    myScore=0; solvedWords=new Set(); activeWordIdx=null;
+    typeLocked=false; pendingTypeChoice=null; clueType='devinette';
+  } catch(e){}
+
+  // ── Tentative de fermeture ──
+  // Cas 1 : PWA installée sur écran d'accueil → window.close() marche
+  // Cas 2 : Onglet ouvert par l'utilisateur → bloqué, on affiche la page Au revoir
+  try { window.close(); } catch(e){}
+
+  setTimeout(() => {
+    // Si on est encore là après 200ms, window.close() a été bloqué
+    // → Afficher la page "Au revoir" en remplacement du DOM
+    document.open();
+    document.write(`<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>LexiPyramide — À bientôt !</title>
+<link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;700;800&family=Orbitron:wght@700;900&display=swap" rel="stylesheet"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#03030c;min-height:100vh;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;font-family:'Exo 2',sans-serif;
+    color:#eeeeff;text-align:center;padding:30px 20px;
+    background-image:radial-gradient(ellipse 70% 50% at 50% 30%,rgba(61,127,255,.07) 0,transparent 60%);}
+  .icon{font-size:3.5em;margin-bottom:18px;animation:wave 1.5s ease-in-out 2;}
+  @keyframes wave{0%,100%{transform:rotate(0)}25%{transform:rotate(-18deg)}75%{transform:rotate(18deg)}}
+  h1{font-family:'Orbitron',sans-serif;font-size:1.8em;color:#f5c400;margin-bottom:10px;
+    text-shadow:0 0 30px rgba(245,196,0,.3);}
+  p{color:#9090bb;line-height:1.8;margin-bottom:8px;font-size:.95em;max-width:380px;}
+  .pills{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:20px 0 28px;}
+  .pill{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+    border-radius:50px;padding:5px 14px;font-size:.75em;color:#9090bb;}
+  .pill .ok{color:#00cc7a;margin-right:4px;}
+  .btn-back{padding:12px 32px;background:linear-gradient(135deg,#f5c400,#ffe566);
+    color:#03030c;border:none;border-radius:50px;font-family:'Exo 2',sans-serif;
+    font-weight:800;font-size:.95em;cursor:pointer;transition:all .2s;}
+  .btn-back:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(245,196,0,.25);}
+  .hint{font-size:.72em;color:#5a5a88;margin-top:20px;}
+</style>
+</head>
+<body>
+  <div class="icon">👋</div>
+  <h1>À bientôt !</h1>
+  <p>Tu as quitté LexiPyramide.<br>Tout a été sauvegardé avant ta sortie.</p>
+  <div class="pills">
+    <div class="pill"><span class="ok">✓</span> Profil sauvegardé</div>
+    <div class="pill"><span class="ok">✓</span> Progression conservée</div>
+    <div class="pill"><span class="ok">✓</span> Badges intacts</div>
+    <div class="pill"><span class="ok">✓</span> Score protégé</div>
+  </div>
+  <button class="btn-back" onclick="window.location.reload()">🎮 Rejouer</button>
+  <p class="hint">Ou ferme simplement cet onglet avec le bouton de ton appareil.</p>
+</body>
+</html>`);
+    document.close();
+  }, 250);
+}
+
 function doLeave(){
   saveProgress();
   closeModal();
@@ -3253,6 +3952,19 @@ async function showFinal(){
   saveProgress();
   // ── PROGRESSION : enregistrer la partie ──
   try { recordGameEnd(myScore, solvedWords.size, gameMode); } catch(e){}
+  // ── IndexedDB : sauvegarder dans l'historique ──
+  if(gameMode==='solo' && playerEmail){
+    try{
+      if(typeof idbAddHistory === 'function'){
+        await idbAddHistory(playerEmail, {
+          date: Date.now(), score: myScore,
+          mots: solvedWords.size, mode: 'solo', type: clueType
+        });
+      }
+      // Effacer la progression en cours (partie terminée)
+      if(typeof idbClearProgress === 'function') idbClearProgress(playerEmail).catch(()=>{});
+    }catch(e){}
+  }
   showScreen('final');
   if(gameMode==='solo'){
     document.getElementById('podium').innerHTML=`
@@ -3356,24 +4068,46 @@ const DEFAULT_DEFI_THEMES = [
 ];
 
 // ── INIT ──
-function initDefi(){
+async function initDefi(){
   // Sauvegarder le score du jeu avant d'entrer
   defiGameScoreBefore = myScore;
 
-  // Charger depuis Firebase
-  Promise.all([
-    get(ref(db,'defiThemes')),
-    get(ref(db,'defiTimeout'))
-  ]).then(([thSnap, toSnap])=>{
-    if(thSnap.exists()) defiThemes = thSnap.val();
-    else defiThemes = JSON.parse(JSON.stringify(DEFAULT_DEFI_THEMES));
-    defiTimeoutSec = toSnap.exists() ? (parseInt(toSnap.val())||45) : 45;
+  if(window.__isOnline){
+    // ── En ligne : charger depuis Firebase puis mettre en cache IDB ──
+    Promise.all([
+      get(ref(db,'defiThemes')),
+      get(ref(db,'defiTimeout'))
+    ]).then(async ([thSnap, toSnap])=>{
+      if(thSnap.exists()) defiThemes = thSnap.val();
+      else defiThemes = JSON.parse(JSON.stringify(DEFAULT_DEFI_THEMES));
+      defiTimeoutSec = toSnap.exists() ? (parseInt(toSnap.val())||45) : 45;
+      // Mise en cache IDB pour utilisation hors ligne
+      if(typeof idbCacheDefi === 'function'){
+        idbCacheDefi(defiThemes, defiTimeoutSec).catch(()=>{});
+      }
+      _openThemeModal();
+    }).catch(async ()=>{
+      // Erreur réseau → tenter le cache IDB
+      const cached = typeof idbGetCachedDefi==='function' ? await idbGetCachedDefi() : null;
+      if(cached){ defiThemes=cached.themes; defiTimeoutSec=cached.timeout||45; }
+      else { defiThemes=JSON.parse(JSON.stringify(DEFAULT_DEFI_THEMES)); defiTimeoutSec=45; }
+      _openThemeModal();
+    });
+  } else {
+    // ── Hors ligne : lire depuis le cache IDB ──
+    const cached = typeof idbGetCachedDefi==='function' ? await idbGetCachedDefi() : null;
+    if(cached){
+      defiThemes = cached.themes;
+      defiTimeoutSec = cached.timeout || 45;
+      const age = Math.round((Date.now()-cached.cachedAt)/(1000*60));
+      toast(`📦 Thèmes Défi depuis le cache (il y a ${age} min)`, 'var(--teal)');
+    } else {
+      defiThemes = JSON.parse(JSON.stringify(DEFAULT_DEFI_THEMES));
+      defiTimeoutSec = 45;
+      toast('📦 Thèmes par défaut (hors ligne)', 'var(--orange)');
+    }
     _openThemeModal();
-  }).catch(()=>{
-    defiThemes = JSON.parse(JSON.stringify(DEFAULT_DEFI_THEMES));
-    defiTimeoutSec = 45;
-    _openThemeModal();
-  });
+  }
 }
 
 function _openThemeModal(){
@@ -4042,6 +4776,10 @@ function loadProfil() {
 
 function saveProfil(p) {
   try { localStorage.setItem(PROFIL_KEY, JSON.stringify(p)); } catch(e) {}
+  // Miroir IDB si email disponible
+  if(p && p.email && typeof idbSaveProfil === 'function'){
+    idbSaveProfil(p).catch(()=>{});
+  }
 }
 
 // ── CALCUL NIVEAU ──
@@ -4376,12 +5114,11 @@ function showBadgePopup(icon, name) {
 
 
 // ═══════════════════════════════════════════
-// SPLASH SCREEN
+// SPLASH SCREEN — avec statut connexion + IDB
 // ═══════════════════════════════════════════
 (function() {
-  var msgs = ['Chargement...', 'Initialisation...', 'Prêt !'];
-  var idx = 0;
   var statusEl = document.getElementById('splStatus');
+  var msgs = ['Chargement...', 'Initialisation...', navigator.onLine ? 'En ligne ✅' : 'Hors ligne — Mode Solo 📦'];
 
   var t1 = setTimeout(function() {
     if(statusEl) statusEl.textContent = msgs[1];
@@ -4402,7 +5139,105 @@ function dismissSplash() {
   splash.classList.add('exit');
   setTimeout(function() {
     splash.style.display = 'none';
+    // Après fermeture du splash, si hors ligne → basculer en solo + afficher bannière
+    if(!navigator.onLine){
+      if(typeof selectMode === 'function') selectMode('solo');
+      var ob = document.getElementById('offlineBanner');
+      if(ob) ob.style.display = 'block';
+    }
+    // Si une mise à jour SW est prête, proposer le rechargement
+    window.addEventListener('sw-update-ready', function(){
+      if(confirm('🔄 Une mise à jour de LexiPyramide est disponible. Recharger ?')){
+        if(navigator.serviceWorker.controller){
+          navigator.serviceWorker.controller.postMessage({type:'SKIP_WAITING'});
+        }
+        window.location.reload();
+      }
+    });
   }, 750);
 }
 
+// ═══════════════════════════════════════════
+// EXPOSITION GLOBALE DES FONCTIONS LOCALES
+// (pour l'indicateur offline dans la topbar)
+// ═══════════════════════════════════════════
+window.toast = function(msg, col){ 
+  try {
+    const t = document.getElementById('toast');
+    if(!t) return;
+    t.textContent = msg;
+    t.style.borderColor = col || 'var(--gold)';
+    t.classList.add('show');
+    clearTimeout(window._toastTimer);
+    window._toastTimer = setTimeout(()=>t.classList.remove('show'), 3000);
+  } catch(e){}
+};
+
+// ═══════════════════════════════════════════
+// PRELOAD IDB au démarrage (warm-up)
+// ═══════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', function(){
+  // Initialiser IDB dès le démarrage pour qu'il soit prêt rapidement
+  if(typeof idbPromise !== 'undefined'){
+    idbPromise.then(()=>{
+      console.log('[App] IDB prête au démarrage ✅');
+    }).catch(err => {
+      console.warn('[App] IDB indisponible (mode dégradé localStorage):', err);
+    });
+  }
+
+  // Afficher le statut connexion dans le splash
+  var splStatus = document.getElementById('splStatus');
+  if(splStatus && !navigator.onLine){
+    splStatus.textContent = '📦 Hors ligne — Mode Solo disponible';
+  }
+});
+
+</script>
+
+<!-- ═══════════════════════════════════════
+  PWA INSTALL BANNER (optionnel — affiché si
+  l'utilisateur peut installer l'app)
+════════════════════════════════════════ -->
+<div id="pwaInstallBanner" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);
+  background:var(--s2);border:1.5px solid var(--gold);border-radius:50px;padding:10px 20px;
+  z-index:998;display:none;align-items:center;gap:10px;font-size:.82em;font-weight:700;
+  box-shadow:0 4px 20px rgba(245,196,0,.15);white-space:nowrap;">
+  <span>📲 Installer LexiPyramide sur ton écran</span>
+  <button id="pwaInstallBtn" style="background:linear-gradient(135deg,var(--gold),#ffe566);color:#03030c;
+    border:none;border-radius:50px;padding:6px 16px;font-weight:700;font-family:'Exo 2',sans-serif;cursor:pointer;">
+    Installer
+  </button>
+  <button onclick="document.getElementById('pwaInstallBanner').style.display='none';"
+    style="background:transparent;border:none;color:var(--muted2);cursor:pointer;font-size:1.1em;">✕</button>
+</div>
+
+<script>
+// ── PWA Install Prompt ──
+let _deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  const banner = document.getElementById('pwaInstallBanner');
+  if(banner) banner.style.display = 'flex';
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('pwaInstallBtn');
+  if(btn){
+    btn.addEventListener('click', async () => {
+      if(!_deferredInstallPrompt) return;
+      _deferredInstallPrompt.prompt();
+      const { outcome } = await _deferredInstallPrompt.userChoice;
+      console.log('[PWA] Install outcome:', outcome);
+      _deferredInstallPrompt = null;
+      document.getElementById('pwaInstallBanner').style.display = 'none';
+    });
+  }
+});
+
+window.addEventListener('appinstalled', () => {
+  console.log('[PWA] Application installée ✅');
+  document.getElementById('pwaInstallBanner').style.display = 'none';
+});
 </script>
