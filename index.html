@@ -2429,8 +2429,23 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  setPersistence,
+  browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+  serverTimestamp as fsTimestamp
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const FB = {
   apiKey:"AIzaSyDkq49IODXP84Hu3fOTGeCuuU6J96l5SgM",
@@ -2438,8 +2453,9 @@ const FB = {
   databaseURL:"https://le-mot-4536b-default-rtdb.firebaseio.com",
   projectId:"le-mot-4536b",
   storageBucket:"le-mot-4536b.firebasestorage.app",
-  messagingSenderId:"880166730997",
-  appId:"1:880166730967:web:8c0dd542c7976f5f06c492"
+  messagingSenderId:"880166730967",
+  appId:"1:880166730967:web:ddef7a26d38e71cc06c492",
+  measurementId:"G-Y2SMV5B9F9"
 };
 
 // ── ADMIN EMAIL — compte Firebase de l'administrateur ──
@@ -2816,9 +2832,16 @@ console.log('[IDB] Module IndexedDB prêt ✅');
 
 const RANK_PTS = {A:{dev:5,cha:6},B:{dev:4,cha:5},C:{dev:2,cha:3},D:{dev:1,cha:2}};
 
-const app = initializeApp(FB);
-const db = getDatabase(app);
+const app  = initializeApp(FB);
+const db   = getDatabase(app);
 const auth = getAuth(app);
+const fdb  = getFirestore(app); // ── Firestore Cloud
+
+// ── PERSISTENCE LOCALE — évite un aller-retour réseau à chaque chargement ──
+// C'est la principale cause de lenteur de l'auth email/password.
+setPersistence(auth, browserLocalPersistence).catch(e =>
+  console.warn('[Auth] Persistence non disponible:', e)
+);
 
 // ── UID Firebase du joueur connecté (Auth) ──
 let currentUser = null; // Firebase Auth user object
@@ -3106,10 +3129,86 @@ async function _syncUserToDatabase(user) {
       });
     }
     console.log('[DB] Joueur synchronisé ✅ UID:', user.uid);
+    // Sync Firestore en parallèle (non bloquant)
+    _syncUserToFirestore(user, snap.exists() ? snap.val() : null).catch(() => {});
   } catch(e) {
     console.warn('[DB] Sync joueur échouée:', e);
   }
 }
+
+// ════════════════════════════════════════════════════════
+//  🔥 FIRESTORE CLOUD — Profils & Scores globaux
+//  Collection : users/{uid}   → profil complet
+//  Collection : leaderboard/{uid} → score global
+// ════════════════════════════════════════════════════════
+
+async function _syncUserToFirestore(user, existingRtdb) {
+  try {
+    const userDocRef = doc(fdb, 'users', user.uid);
+    const snap = await getDoc(userDocRef);
+    const now = fsTimestamp();
+    if (snap.exists()) {
+      await updateDoc(userDocRef, { email: user.email, lastSeen: now, uid: user.uid });
+    } else {
+      await setDoc(userDocRef, {
+        uid:      user.uid,
+        email:    user.email,
+        name:     user.displayName || user.email.split('@')[0],
+        score:    existingRtdb?.score  || 0,
+        solved:   existingRtdb?.solved || [],
+        badges:   [],
+        xp:       0,
+        level:    1,
+        joinedAt: now,
+        lastSeen: now,
+        isAdmin:  user.email === ADMIN_EMAIL,
+      });
+    }
+    console.log('[Firestore] Profil synchronisé ✅');
+  } catch(e) {
+    console.warn('[Firestore] Sync profil échouée:', e);
+  }
+}
+
+/** Sauvegarder le score dans Firestore (appelé en plus de Realtime DB) */
+async function fsUpdateScore(uid, score, solved) {
+  if (!uid) return;
+  try {
+    await updateDoc(doc(fdb, 'users', uid), {
+      score,
+      solved,
+      lastSeen: fsTimestamp(),
+    });
+    // Leaderboard global
+    await setDoc(doc(fdb, 'leaderboard', uid), {
+      uid,
+      name:  currentUser?.displayName || currentUser?.email?.split('@')[0] || '?',
+      score,
+      mots:  (solved || []).length,
+      updatedAt: fsTimestamp(),
+    }, { merge: true });
+  } catch(e) {
+    console.warn('[Firestore] fsUpdateScore erreur:', e);
+  }
+}
+window.fsUpdateScore = fsUpdateScore;
+
+/** Charger le top 50 depuis Firestore leaderboard */
+async function fsGetLeaderboard(limitN = 50) {
+  try {
+    const q = query(
+      collection(fdb, 'leaderboard'),
+      orderBy('score', 'desc'),
+      limit(limitN)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data());
+  } catch(e) {
+    console.warn('[Firestore] fsGetLeaderboard erreur:', e);
+    return [];
+  }
+}
+window.fsGetLeaderboard = fsGetLeaderboard;
 
 // ── INSCRIPTION — Créer un compte Firebase ──
 window.firebaseRegister = async function() {
@@ -4818,6 +4917,7 @@ function _showDefiFinish(){
     document.getElementById('myPts').textContent=myScore.toFixed(2);
     if(playerId){
       update(ref(db,`players/${playerId}`),{score:myScore}).catch(()=>{});
+      if(currentUID) fsUpdateScore(currentUID, myScore, null).catch(()=>{}); // sync Firestore
     }else if(gameMode==='solo'){
       saveProgress();
     }
