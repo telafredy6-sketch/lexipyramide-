@@ -1628,12 +1628,9 @@ body:has(#screen-game.active) .wrap{position:static;}
     <div class="auth-box card card-glow">
       <div style="font-size:2.2em;margin-bottom:12px;">🔐</div>
       <h2>Accès Admin</h2>
-      <p>Panneau réservé à l'administrateur du jeu.</p>
-      <div class="field"><label class="lbl">Mot de passe</label>
-        <input type="password" id="adminPwd" class="inp" placeholder="••••••••••"
-          onkeydown="if(event.key==='Enter')checkAdminPwd()"/></div>
-      <button class="btn btn-gold btn-full" onclick="checkAdminPwd()">🔓 Accéder</button>
-      <div class="auth-err" id="authErr">❌ Mot de passe incorrect</div>
+      <p>Connexion réservée à l'administrateur.</p>
+      <button class="btn btn-gold btn-full" style="margin-top:16px;" onclick="openAuthModal('admin')">🔑 Se connecter via Firebase</button>
+      <div class="auth-err" id="authErr" style="display:none;">❌ Accès refusé</div>
     </div>
   </div>
 </div>
@@ -1756,6 +1753,21 @@ body:has(#screen-game.active) .wrap{position:static;}
       <div style="font-size:2em;margin-bottom:10px;">🎮</div>
       <h2>Rejoindre</h2>
       <p>Entre tes informations pour jouer. Ton email permet de sauvegarder et reprendre ta partie !</p>
+
+      <!-- Bannière connexion Firebase pour le multi -->
+      <div id="authRequiredBanner" style="
+        display:none;padding:12px 14px;margin-bottom:14px;
+        background:rgba(0,232,200,.07);border:1.5px solid rgba(0,232,200,.25);
+        border-radius:12px;text-align:center;">
+        <div style="font-size:.82em;font-weight:700;color:var(--teal);margin-bottom:8px;">
+          🔐 Connecte-toi pour le Multijoueur
+        </div>
+        <div style="font-size:.74em;color:var(--muted2);margin-bottom:10px;">
+          Un compte Firebase est requis pour jouer en ligne et synchroniser ton score.
+        </div>
+        <button class="btn btn-teal btn-sm" onclick="openAuthModal('login')">⚡ Connexion / Inscription</button>
+      </div>
+
       <div class="field">
         <label class="lbl">Ton prénom / pseudo</label>
         <input type="text" id="playerName" class="inp" placeholder="ex: Fredy" maxlength="20"
@@ -2411,6 +2423,14 @@ body:has(#screen-game.active) .wrap{position:static;}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, get, onValue, update, push, remove, serverTimestamp, onDisconnect }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  updateProfile
+} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 const FB = {
   apiKey:"AIzaSyDkq49IODXP84Hu3fOTGeCuuU6J96l5SgM",
@@ -2422,7 +2442,9 @@ const FB = {
   appId:"1:880166730967:web:8c0dd542c7976f5f06c492"
 };
 
-const ADMIN_PWD = "Lx#9mP@2k";
+// ── ADMIN EMAIL — compte Firebase de l'administrateur ──
+const ADMIN_EMAIL = "itsuomimeffotela@gmail.com";
+const ADMIN_PWD = "Lx#9mP@2k"; // Gardé pour compatibilité fallback
 
 // ════════════════════════════════════════════════════════════════
 //  ██╗██████╗ ██████╗     ███╗   ███╗ ██████╗ ██████╗
@@ -2796,6 +2818,11 @@ const RANK_PTS = {A:{dev:5,cha:6},B:{dev:4,cha:5},C:{dev:2,cha:3},D:{dev:1,cha:2
 
 const app = initializeApp(FB);
 const db = getDatabase(app);
+const auth = getAuth(app);
+
+// ── UID Firebase du joueur connecté (Auth) ──
+let currentUser = null; // Firebase Auth user object
+let currentUID  = null; // UID unique Firebase
 
 // ── DEFAULT DATA ──
 const DEFAULT_LETTERS = ['A','M','O','U','R','E','S','T','I'];
@@ -3019,18 +3046,244 @@ document.getElementById('playerEmail').addEventListener('input', async function(
   if(rb) rb.style.display='none';
 });
 
-// ── ADMIN ──
-function checkAdminPwd(){
-  const v=document.getElementById('adminPwd').value;
-  if(v===ADMIN_PWD){
-    isAdmin=true;
-    document.getElementById('authErr').style.display='none';
-    initAdmin();
-  }else{
-    document.getElementById('authErr').style.display='block';
+// ═══════════════════════════════════════════════════════════════
+//  🔐 FIREBASE AUTHENTICATION — Système complet
+//  • Inscription/Connexion joueurs par email + password
+//  • Admin détecté via ADMIN_EMAIL
+//  • UID unique stocké dans Realtime DB sous /players/{uid}
+// ═══════════════════════════════════════════════════════════════
+
+// ── Écouteur d'état d'authentification global ──
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  currentUID  = user ? user.uid : null;
+
+  // Mettre à jour TOUS les indicateurs d'état auth dans les topbars
+  document.querySelectorAll('#authStatusDot').forEach(dot => {
+    dot.style.background = user ? '#00cc7a' : '#ff8c00';
+  });
+  document.querySelectorAll('#authStatusLbl').forEach(lbl => {
+    lbl.textContent = user ? (user.displayName || user.email.split('@')[0]) : 'Non connecté';
+    lbl.style.color = user ? 'var(--teal)' : 'var(--muted2)';
+  });
+
+  if (user) {
+    console.log('[Auth] Connecté :', user.email, '| UID :', user.uid);
+    // Enregistrer/Mettre à jour le joueur dans la DB avec son UID
+    _syncUserToDatabase(user);
+  } else {
+    console.log('[Auth] Déconnecté');
+  }
+});
+
+// ── Synchroniser le joueur avec la Realtime Database ──
+async function _syncUserToDatabase(user) {
+  const playerRef = ref(db, `players/${user.uid}`);
+  try {
+    const snap = await get(playerRef);
+    const now = Date.now();
+    if (snap.exists()) {
+      // Joueur existant — mettre à jour lastSeen et email
+      await update(playerRef, {
+        email:    user.email,
+        name:     user.displayName || snap.val().name || user.email.split('@')[0],
+        lastSeen: now,
+        uid:      user.uid,
+      });
+    } else {
+      // Nouveau joueur — créer son profil complet
+      await set(playerRef, {
+        uid:       user.uid,
+        email:     user.email,
+        name:      user.displayName || user.email.split('@')[0],
+        score:     0,
+        solved:    [],
+        mode:      'multi',
+        clueType:  '',
+        joinedAt:  now,
+        lastSeen:  now,
+        isAdmin:   user.email === ADMIN_EMAIL,
+      });
+    }
+    console.log('[DB] Joueur synchronisé ✅ UID:', user.uid);
+  } catch(e) {
+    console.warn('[DB] Sync joueur échouée:', e);
   }
 }
-function logout(){isAdmin=false;showScreen('landing');}
+
+// ── INSCRIPTION — Créer un compte Firebase ──
+window.firebaseRegister = async function() {
+  const email    = document.getElementById('authEmail')?.value.trim();
+  const password = document.getElementById('authPassword')?.value.trim();
+  const pseudo   = document.getElementById('authPseudo')?.value.trim();
+  const errEl    = document.getElementById('authError');
+
+  if (!pseudo)    return _showAuthError('Entre ton prénom / pseudo !');
+  if (!email || !email.includes('@')) return _showAuthError('Adresse email invalide !');
+  if (!password || password.length < 6) return _showAuthError('Mot de passe : 6 caractères minimum.');
+
+  _setAuthLoading(true);
+  try {
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    await updateProfile(cred.user, { displayName: pseudo });
+    // playerName et playerEmail sont mis à jour automatiquement via onAuthStateChanged
+    playerName  = pseudo;
+    playerEmail = email;
+    toast('✅ Compte créé ! Bienvenue ' + pseudo + ' !', 'var(--green)');
+    // Fermer le modal auth et préparer le jeu
+    _closeAuthModal();
+    // Si admin → aller directement au panneau admin
+    if (email === ADMIN_EMAIL) {
+      isAdmin = true;
+      initAdmin();
+    } else {
+      showScreen('join');
+      document.getElementById('playerName').value  = pseudo;
+      document.getElementById('playerEmail').value = email;
+      document.getElementById('playerName').disabled  = true;
+      document.getElementById('playerEmail').disabled = true;
+    }
+  } catch(e) {
+    _showAuthError(_firebaseErrorMsg(e.code));
+  } finally {
+    _setAuthLoading(false);
+  }
+};
+
+// ── CONNEXION — Se connecter à son compte ──
+window.firebaseLogin = async function() {
+  const email    = document.getElementById('authEmail')?.value.trim();
+  const password = document.getElementById('authPassword')?.value.trim();
+
+  if (!email || !email.includes('@')) return _showAuthError('Adresse email invalide !');
+  if (!password) return _showAuthError('Entre ton mot de passe.');
+
+  _setAuthLoading(true);
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const user = cred.user;
+    playerName  = user.displayName || user.email.split('@')[0];
+    playerEmail = user.email;
+    toast('👋 Bienvenue ' + playerName + ' !', 'var(--teal)');
+    _closeAuthModal();
+    // Admin → panneau admin directement
+    if (email === ADMIN_EMAIL) {
+      isAdmin = true;
+      initAdmin();
+    } else {
+      showScreen('join');
+      document.getElementById('playerName').value  = playerName;
+      document.getElementById('playerEmail').value = email;
+      document.getElementById('playerName').disabled  = true;
+      document.getElementById('playerEmail').disabled = true;
+    }
+  } catch(e) {
+    _showAuthError(_firebaseErrorMsg(e.code));
+  } finally {
+    _setAuthLoading(false);
+  }
+};
+
+// ── DÉCONNEXION Firebase ──
+window.firebaseLogout = async function() {
+  try {
+    await signOut(auth);
+    currentUser = null; currentUID = null;
+    isAdmin = false;
+    playerName = ''; playerEmail = '';
+    toast('👋 Déconnecté.', 'var(--muted2)');
+    showScreen('landing');
+  } catch(e) {
+    console.warn('[Auth] Logout erreur:', e);
+  }
+};
+
+// ── Ouvrir le modal d'authentification ──
+window.openAuthModal = function(mode) {
+  // mode = 'login' | 'register' | 'admin'
+  const modal = document.getElementById('authModalOv');
+  if (!modal) return;
+  modal.classList.add('show');
+  // Basculer vers le bon onglet
+  _switchAuthTab(mode === 'register' ? 'register' : 'login');
+  if (mode === 'admin') {
+    const titleEl = document.getElementById('authModalTitle');
+    if (titleEl) titleEl.textContent = '🔐 Connexion Admin';
+  }
+  // Pré-remplir si admin
+  if (mode === 'admin') {
+    const emailEl = document.getElementById('authEmail');
+    if (emailEl) emailEl.value = ADMIN_EMAIL;
+  }
+  document.getElementById('authEmail')?.focus();
+};
+
+window._closeAuthModal = function() {
+  const modal = document.getElementById('authModalOv');
+  if (modal) modal.classList.remove('show');
+  document.getElementById('authError').textContent = '';
+};
+window.closeAuthModal = window._closeAuthModal;
+
+window._switchAuthTab = function(tab) {
+  const isReg = tab === 'register';
+  document.getElementById('authTabLogin')?.classList.toggle('active', !isReg);
+  document.getElementById('authTabReg')?.classList.toggle('active', isReg);
+  const pseudoField = document.getElementById('authPseudoField');
+  if (pseudoField) pseudoField.style.display = isReg ? 'block' : 'none';
+  const btnLogin = document.getElementById('authBtnLogin');
+  const btnReg   = document.getElementById('authBtnReg');
+  if (btnLogin) btnLogin.style.display = isReg ? 'none' : 'flex';
+  if (btnReg)   btnReg.style.display   = isReg ? 'flex'  : 'none';
+  document.getElementById('authError').textContent = '';
+};
+window.switchAuthTab = window._switchAuthTab;
+
+function _showAuthError(msg) {
+  const el = document.getElementById('authError');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+}
+function _setAuthLoading(on) {
+  const btn1 = document.getElementById('authBtnLogin');
+  const btn2 = document.getElementById('authBtnReg');
+  if (btn1) btn1.disabled = on;
+  if (btn2) btn2.disabled = on;
+}
+function _firebaseErrorMsg(code) {
+  const msgs = {
+    'auth/email-already-in-use':    '📧 Cet email est déjà utilisé. Connecte-toi !',
+    'auth/invalid-email':           '📧 Adresse email invalide.',
+    'auth/weak-password':           '🔑 Mot de passe trop faible (min 6 caractères).',
+    'auth/user-not-found':          '❌ Aucun compte avec cet email. Inscris-toi !',
+    'auth/wrong-password':          '❌ Mot de passe incorrect.',
+    'auth/invalid-credential':      '❌ Email ou mot de passe incorrect.',
+    'auth/too-many-requests':       '⏳ Trop de tentatives. Réessaie dans quelques minutes.',
+    'auth/network-request-failed':  '🔌 Erreur réseau. Vérifie ta connexion.',
+  };
+  return msgs[code] || '❌ Erreur : ' + code;
+}
+
+// ── Admin — remplace l'ancienne vérification par mot de passe ──
+function checkAdminPwd() {
+  // Si l'utilisateur est déjà connecté via Firebase Auth et que c'est l'admin
+  if (currentUser && currentUser.email === ADMIN_EMAIL) {
+    isAdmin = true;
+    document.getElementById('authErr').style.display = 'none';
+    initAdmin();
+    return;
+  }
+  // Sinon ouvrir le modal Firebase Auth en mode admin
+  openAuthModal('admin');
+}
+
+// ── Déconnexion Admin ──
+function logout() {
+  isAdmin = false;
+  // Ne pas déconnecter Firebase ici pour que le joueur reste identifié
+  showScreen('landing');
+}
+
+// ═══════════════════════════════════════════════════════════════
 
 function switchAdminTab(idx){
   document.querySelectorAll('.admin-tab').forEach((t,i)=>t.classList.toggle('active',i===idx));
@@ -3285,6 +3538,11 @@ function selectMode(m){
   // Afficher/masquer bannière hors ligne
   const ob = document.getElementById('offlineBanner');
   if(ob) ob.style.display = !window.__isOnline ? 'block' : 'none';
+  // Afficher/masquer bannière auth requise pour le multi
+  const authBanner = document.getElementById('authRequiredBanner');
+  if(authBanner){
+    authBanner.style.display = (m==='multi' && !currentUID) ? 'block' : 'none';
+  }
 }
 
 // ── TYPE CHOICE MODAL ──
@@ -3357,8 +3615,14 @@ async function joinGame(){
   // ── Bloquer le multijoueur si hors ligne ────────────────────
   if(gameMode==='multi' && !window.__isOnline){
     toast('🔴 Connexion requise pour le multijoueur !','var(--red)');
-    // Basculer automatiquement en solo
     selectMode('solo');
+    return;
+  }
+
+  // ── Vérifier l'auth Firebase pour le mode multi ──────────────
+  if(gameMode==='multi' && !currentUser){
+    toast('🔐 Connecte-toi pour jouer en multijoueur !','var(--orange)');
+    openAuthModal('login');
     return;
   }
 
@@ -3368,7 +3632,6 @@ async function joinGame(){
     const p = loadProfil();
     p.name = name; p.email = email; p.lastSeen = Date.now();
     saveProfil(p);
-    // Sync profil vers IDB
     if(typeof idbSaveProfil === 'function') idbSaveProfil({...p, email}).catch(()=>{});
   } catch(e){}
 
@@ -3380,7 +3643,6 @@ async function joinGame(){
       const [wSnap,lSnap]=await Promise.all([get(ref(db,'gameWords')),get(ref(db,'gameLetters'))]);
       if(wSnap.exists()) gameWords=wSnap.val();
       if(lSnap.exists()) gameLetters=lSnap.val();
-      // ── Mettre en cache pour utilisation hors ligne ──
       if(typeof idbCacheGame === 'function'){
         idbCacheGame(gameWords, gameLetters).catch(()=>{});
       }
@@ -3390,61 +3652,118 @@ async function joinGame(){
       if(cached){ gameWords=cached.words; gameLetters=cached.letters; }
     }
   } else {
-    // Hors ligne : lire depuis le cache IDB
     const cached = typeof idbGetCachedGame==='function' ? await idbGetCachedGame() : null;
     if(cached){
       gameWords=cached.words; gameLetters=cached.letters;
       const age = Math.round((Date.now()-cached.cachedAt)/(1000*60));
       toast(`📦 Jeu chargé depuis le cache (il y a ${age} min)`, 'var(--teal)');
     } else {
-      // Aucun cache : utiliser les mots par défaut
       gameWords=[...DEFAULT_WORDS]; gameLetters=[...DEFAULT_LETTERS];
       toast('📦 Mots par défaut (premier lancement hors ligne)', 'var(--orange)');
     }
   }
 
   if(gameMode==='multi'){
-    const pSnap=await get(ref(db,'players'));
-    const existing=pSnap.val()||{};
-    const foundEntry=Object.entries(existing).find(([,p])=>p.email===email);
+    // ── Utiliser l'UID Firebase comme identifiant joueur ──────────
+    const uid = currentUID || null;
 
-    if(foundEntry){
-      // ── RESTORE SESSION ──
-      const [pid,p]=foundEntry;
-      playerId=pid;myScore=p.score||0;
-      solvedWords=new Set((p.solved||[]).map(Number));
-      clueType=p.clueType||'devinette';
-      typeLocked=true;
-      await update(ref(db,`players/${pid}`),{name,lastSeen:serverTimestamp()});
-      onDisconnect(ref(db,`players/${pid}/online`)).set(false);
-      hideWait();
-      toast(`👋 ${name} — Type ${clueType==='devinette'?'📝 Devinette':'🧩 Charade'} restauré et verrouillé.`,'var(--teal)');
-      document.getElementById('playerName').disabled=true;
-      document.getElementById('playerEmail').disabled=true;
-      document.getElementById('lobbyArea').style.display='block';
-      _setupMultiListeners();
-      launchGame();
+    if(uid){
+      // Joueur authentifié — utiliser l'UID comme playerId
+      playerId = uid;
+      const playerRef = ref(db, `players/${uid}`);
+      const snap = await get(playerRef);
+
+      if(snap.exists()){
+        // Restaurer la session depuis la DB
+        const p = snap.val();
+        myScore = p.score || 0;
+        solvedWords = new Set((p.solved||[]).map(Number));
+        clueType = p.clueType || 'devinette';
+        typeLocked = !!p.clueType;
+        // Mettre à jour nom et lastSeen
+        await update(playerRef, {name, email, lastSeen: serverTimestamp(), mode:'multi'});
+        onDisconnect(ref(db,`players/${uid}/online`)).set(false);
+        hideWait();
+        if(typeLocked){
+          toast(`👋 ${name} — Partie restaurée ! (${clueType==='devinette'?'📝 Devinette':'🧩 Charade'})`, 'var(--teal)');
+          document.getElementById('playerName').disabled=true;
+          document.getElementById('playerEmail').disabled=true;
+          document.getElementById('lobbyArea').style.display='block';
+          _setupMultiListeners();
+          launchGame();
+        } else {
+          document.getElementById('playerName').disabled=true;
+          document.getElementById('playerEmail').disabled=true;
+          document.getElementById('lobbyArea').style.display='block';
+          _setupMultiListeners();
+          _openTypeModal(async()=>{
+            typeLocked=true;
+            await update(playerRef,{clueType});
+            const gs=await get(ref(db,'gameState'));
+            if(gs.exists()&&gs.val().status==='playing')launchGame();
+          });
+        }
+      } else {
+        // Nouveau joueur authentifié — créer son entrée avec l'UID
+        myScore=0; solvedWords=new Set(); typeLocked=false;
+        await set(playerRef,{
+          uid, name, email,
+          score:0, solved:[], mode:'multi', clueType:'',
+          joinedAt:Date.now(), lastSeen:Date.now(), isAdmin: email===ADMIN_EMAIL
+        });
+        onDisconnect(playerRef).update({online:false});
+        hideWait();
+        document.getElementById('playerName').disabled=true;
+        document.getElementById('playerEmail').disabled=true;
+        document.getElementById('lobbyArea').style.display='block';
+        _setupMultiListeners();
+        _openTypeModal(async()=>{
+          typeLocked=true;
+          await update(playerRef,{clueType});
+          const gs=await get(ref(db,'gameState'));
+          if(gs.exists()&&gs.val().status==='playing')launchGame();
+        });
+      }
     } else {
-      // ── NEW PLAYER ──
-      const nameConflict=Object.values(existing).find(p=>p.name.toLowerCase()===name.toLowerCase()&&p.email!==email);
-      if(nameConflict){hideWait();return toast('Ce prénom est déjà pris !','var(--red)');}
-      const pRef=push(ref(db,'players'));
-      playerId=pRef.key;myScore=0;solvedWords=new Set();typeLocked=false;
-      await set(pRef,{name,email,score:0,solved:[],mode:'multi',clueType:'',joinedAt:Date.now()});
-      onDisconnect(pRef).remove();
-      hideWait();
-      document.getElementById('playerName').disabled=true;
-      document.getElementById('playerEmail').disabled=true;
-      document.getElementById('lobbyArea').style.display='block';
-      _setupMultiListeners();
-      // Show type modal — lock once confirmed
-      _openTypeModal(async()=>{
+      // Pas d'UID Firebase — fallback ancien système par email
+      const pSnap=await get(ref(db,'players'));
+      const existing=pSnap.val()||{};
+      const foundEntry=Object.entries(existing).find(([,p])=>p.email===email);
+
+      if(foundEntry){
+        const [pid,p]=foundEntry;
+        playerId=pid;myScore=p.score||0;
+        solvedWords=new Set((p.solved||[]).map(Number));
+        clueType=p.clueType||'devinette';
         typeLocked=true;
-        await update(ref(db,`players/${playerId}`),{clueType});
-        // If game already started, launch directly
-        const gs=await get(ref(db,'gameState'));
-        if(gs.exists()&&gs.val().status==='playing')launchGame();
-      });
+        await update(ref(db,`players/${pid}`),{name,lastSeen:serverTimestamp()});
+        onDisconnect(ref(db,`players/${pid}/online`)).set(false);
+        hideWait();
+        toast(`👋 ${name} — Type ${clueType==='devinette'?'📝 Devinette':'🧩 Charade'} restauré.`,'var(--teal)');
+        document.getElementById('playerName').disabled=true;
+        document.getElementById('playerEmail').disabled=true;
+        document.getElementById('lobbyArea').style.display='block';
+        _setupMultiListeners();
+        launchGame();
+      } else {
+        const nameConflict=Object.values(existing).find(p=>p.name.toLowerCase()===name.toLowerCase()&&p.email!==email);
+        if(nameConflict){hideWait();return toast('Ce prénom est déjà pris !','var(--red)');}
+        const pRef=push(ref(db,'players'));
+        playerId=pRef.key;myScore=0;solvedWords=new Set();typeLocked=false;
+        await set(pRef,{name,email,score:0,solved:[],mode:'multi',clueType:'',joinedAt:Date.now()});
+        onDisconnect(pRef).remove();
+        hideWait();
+        document.getElementById('playerName').disabled=true;
+        document.getElementById('playerEmail').disabled=true;
+        document.getElementById('lobbyArea').style.display='block';
+        _setupMultiListeners();
+        _openTypeModal(async()=>{
+          typeLocked=true;
+          await update(ref(db,`players/${playerId}`),{clueType});
+          const gs=await get(ref(db,'gameState'));
+          if(gs.exists()&&gs.val().status==='playing')launchGame();
+        });
+      }
     }
   } else {
     // ── SOLO — IndexedDB first, localStorage fallback ──
@@ -3455,7 +3774,6 @@ async function joinGame(){
         d = await idbLoadProgress(email);
       }
       if(!d){
-        // Fallback localStorage
         const raw = localStorage.getItem('lexipyr_'+email);
         if(raw) d = JSON.parse(raw);
       }
@@ -3465,7 +3783,6 @@ async function joinGame(){
         clueType=d.clueType||'devinette';
         typeLocked=true;
         hasRestore=true;
-        // Si les mots du jeu sont dans le cache IDB, les restaurer
         if(d.gameWords && d.gameWords.length){
           gameWords = d.gameWords;
         }
@@ -3473,7 +3790,8 @@ async function joinGame(){
       }
     }catch(e){myScore=0;solvedWords=new Set();}
     if(!hasRestore){myScore=0;solvedWords=new Set();typeLocked=false;}
-    playerId='solo_'+Date.now();
+    // En solo, utiliser l'UID Firebase si disponible, sinon timestamp
+    playerId = currentUID ? `solo_${currentUID}` : 'solo_'+Date.now();
     hideWait();
     if(typeLocked){launchGame();}
     else{
@@ -5239,5 +5557,150 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('appinstalled', () => {
   console.log('[PWA] Application installée ✅');
   document.getElementById('pwaInstallBanner').style.display = 'none';
+});
+</script>
+
+<!-- ═══════════════════════════════════════════════════════
+  🔐 FIREBASE AUTH MODAL — Inscription / Connexion joueurs
+════════════════════════════════════════════════════════ -->
+<style>
+#authModalOv.show{display:flex!important;}
+.auth-modal{
+  background:var(--s2);border:1.5px solid var(--border2);
+  border-radius:24px;padding:32px 28px;width:100%;max-width:420px;
+  box-shadow:0 0 60px rgba(0,232,200,.07),0 20px 60px rgba(0,0,0,.5);
+  animation:authIn .3s cubic-bezier(.34,1.36,.64,1);
+}
+@keyframes authIn{from{opacity:0;transform:translateY(20px) scale(.96);}to{opacity:1;transform:none;}}
+.auth-modal h2{
+  font-family:'Orbitron',sans-serif;font-size:1.1em;letter-spacing:.1em;
+  color:var(--gold);margin-bottom:6px;text-align:center;
+}
+.auth-modal>.auth-sub{color:var(--muted2);font-size:.82em;text-align:center;margin-bottom:22px;}
+.auth-tabs-row{display:flex;background:var(--s3);border-radius:10px;padding:3px;margin-bottom:22px;gap:3px;}
+.auth-tab-btn{
+  flex:1;padding:9px;border:none;border-radius:8px;
+  background:transparent;color:var(--muted2);
+  font-family:'Exo 2',sans-serif;font-weight:700;font-size:.82em;
+  cursor:pointer;transition:all .2s;
+}
+.auth-tab-btn.active{background:var(--s5);color:var(--gold);}
+.auth-modal .field{margin-bottom:14px;}
+.auth-modal .lbl{display:block;font-size:.72em;font-weight:800;color:var(--muted2);
+  text-transform:uppercase;letter-spacing:1.2px;margin-bottom:5px;}
+.auth-modal .inp{width:100%;padding:11px 15px;background:var(--s3);border:1.5px solid var(--border);
+  border-radius:10px;color:var(--txt);font-family:'Exo 2',sans-serif;font-size:.92em;
+  font-weight:600;outline:none;transition:border-color .2s;}
+.auth-modal .inp:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(0,232,200,.08);}
+.auth-error-msg{
+  background:rgba(255,34,68,.08);border:1px solid rgba(255,34,68,.25);
+  border-radius:8px;padding:10px 14px;font-size:.82em;color:var(--red);
+  margin-bottom:14px;
+}
+.auth-error-msg:empty{display:none;}
+.auth-modal .btn-auth{
+  width:100%;padding:13px;border:none;border-radius:50px;
+  font-family:'Exo 2',sans-serif;font-weight:700;font-size:.9em;
+  cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.btn-auth-login{background:linear-gradient(135deg,var(--teal),var(--teal2));color:#03030c;}
+.btn-auth-login:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,232,200,.3);}
+.btn-auth-reg{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#03030c;}
+.btn-auth-reg:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(245,196,0,.3);}
+.auth-modal .btn-auth:disabled{opacity:.5;cursor:not-allowed;transform:none!important;}
+.auth-modal-close{
+  position:absolute;top:14px;right:18px;
+  background:transparent;border:none;color:var(--muted2);
+  font-size:1.3em;cursor:pointer;transition:color .2s;
+}
+.auth-modal-close:hover{color:var(--txt);}
+.auth-uid-info{
+  margin-top:16px;padding:10px 14px;
+  background:rgba(0,232,200,.05);border:1px solid rgba(0,232,200,.15);
+  border-radius:8px;font-size:.72em;color:var(--muted2);text-align:center;line-height:1.5;
+}
+.auth-uid-info strong{color:var(--teal);}
+.auth-indicator{
+  display:flex;align-items:center;gap:6px;
+  background:var(--s3);border:1px solid var(--border);
+  border-radius:50px;padding:5px 12px;cursor:pointer;
+  transition:border-color .2s;font-size:.78em;font-weight:700;
+}
+.auth-indicator:hover{border-color:var(--teal);}
+.auth-dot-pulse{width:7px;height:7px;border-radius:50%;background:#ff8c00;flex-shrink:0;}
+</style>
+
+<div id="authModalOv" style="
+  display:none;position:fixed;inset:0;z-index:2000;
+  background:rgba(3,3,12,.88);backdrop-filter:blur(10px);
+  align-items:center;justify-content:center;padding:20px;"
+  onclick="if(event.target===this)closeAuthModal()">
+<div class="auth-modal" style="position:relative;">
+  <button class="auth-modal-close" onclick="closeAuthModal()">✕</button>
+  <div style="font-size:2em;text-align:center;margin-bottom:10px;">🔐</div>
+  <h2 id="authModalTitle">LexiPyramide</h2>
+  <p class="auth-sub">Connecte-toi pour le multijoueur et pour sauvegarder ton score dans le cloud avec ton <strong style="color:var(--teal);">UID unique Firebase</strong>.</p>
+
+  <div class="auth-tabs-row">
+    <button class="auth-tab-btn active" id="authTabLogin" onclick="switchAuthTab('login')">⚡ Connexion</button>
+    <button class="auth-tab-btn"        id="authTabReg"   onclick="switchAuthTab('register')">✦ Inscription</button>
+  </div>
+
+  <div class="auth-error-msg" id="authError"></div>
+
+  <div class="field" id="authPseudoField" style="display:none;">
+    <label class="lbl">Ton prénom / pseudo</label>
+    <input type="text" id="authPseudo" class="inp" placeholder="ex: Fredy" maxlength="20"
+      onkeydown="if(event.key==='Enter')document.getElementById('authEmail').focus()"/>
+  </div>
+
+  <div class="field">
+    <label class="lbl">Adresse email</label>
+    <input type="email" id="authEmail" class="inp" placeholder="ex: fredy@gmail.com"
+      onkeydown="if(event.key==='Enter')document.getElementById('authPassword').focus()"/>
+  </div>
+
+  <div class="field">
+    <label class="lbl">Mot de passe <span style="font-weight:400;text-transform:none;color:var(--muted);">(min. 6 caractères)</span></label>
+    <input type="password" id="authPassword" class="inp" placeholder="••••••••"
+      onkeydown="if(event.key==='Enter'){
+        const rTab=document.getElementById('authTabReg');
+        if(rTab && rTab.classList.contains('active')) firebaseRegister();
+        else firebaseLogin();
+      }"/>
+  </div>
+
+  <button class="btn-auth btn-auth-login" id="authBtnLogin" onclick="firebaseLogin()">⚡ Se connecter</button>
+  <button class="btn-auth btn-auth-reg"   id="authBtnReg"   onclick="firebaseRegister()" style="display:none;margin-top:10px;">✦ Créer mon compte</button>
+
+  <div class="auth-uid-info">
+    🔑 Un <strong>UID unique Firebase</strong> te sera attribué automatiquement à l'inscription.
+    Il identifie ton compte de façon permanente dans la base de données en temps réel.
+  </div>
+</div>
+</div>
+
+<!-- ── Injection de l'indicateur auth dans toutes les topbars ── -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.topbar').forEach(tb => {
+    if (tb.querySelector('.auth-indicator')) return;
+    const ind = document.createElement('div');
+    ind.className = 'auth-indicator';
+    ind.title = 'Statut de connexion — cliquer pour gérer';
+    ind.innerHTML = '<div class="auth-dot-pulse" id="authStatusDot"></div><span id="authStatusLbl" style="color:var(--muted2);">Non connecté</span>';
+    ind.onclick = () => {
+      const lbl = document.getElementById('authStatusLbl');
+      const connected = lbl && lbl.style.color !== 'var(--muted2)' && lbl.textContent !== 'Non connecté';
+      if (connected) {
+        if (confirm('Se déconnecter de ' + lbl.textContent + ' ?')) {
+          if (typeof window.firebaseLogout === 'function') window.firebaseLogout();
+        }
+      } else {
+        if (typeof window.openAuthModal === 'function') window.openAuthModal('login');
+      }
+    };
+    tb.appendChild(ind);
+  });
 });
 </script>
